@@ -1,0 +1,16 @@
+{
+    "id": "cc-map-image",
+    "version": "0.0.1",
+    "title": "ts map image",
+    "description": "ts map image",
+    "repository": "https://github.com/krypciak/cc-map-image",
+    "tags": [],
+    "authors": "krypek",
+    "icons": {
+        "24": "icon/icon.png"
+    },
+    "dependencies": {
+        "crosscode": ">=1.4.0"
+    },
+    "plugin": "plugin.js"
+}
