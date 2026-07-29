@@ -145,6 +145,10 @@ export default class MapImage implements PluginClass {
                 return this.parent(...args)
             },
         })
+
+        sc.Arena.inject({
+            onVarAccess() {},
+        })
     }
 
     async poststart() {
@@ -288,7 +292,6 @@ async function run() {
     const invalidMaps = new Set(['henne9001', 'text-copy', 'cargo-ship/puzzle-challenge', 'cargo-ship/room3'])
     maps = maps.filter(map => !invalidMaps.has(map))
     maps = maps.filter(map => !map.includes('test'))
-    maps = maps.filter(map => !map.includes('arena'))
 
     // maps = maps.filter(map => map.startsWith('rhombus-dng'))
     // maps = ['bergen-trail/path-2']
