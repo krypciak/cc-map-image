@@ -202,7 +202,6 @@ async function takeScreenshot() {
             entity.update()
         })
     ig.system.resize(ig.game.size.x, ig.game.size.y, 1)
-    // @ts-expect-error
     ig.ScreenBufferPool.clearBuffers()
     ig.game.playerEntity.setPos(ig.game.size.x / 2, ig.game.size.y / 2)
     hideEntity(ig.game.playerEntity)
