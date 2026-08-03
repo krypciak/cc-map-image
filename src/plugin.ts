@@ -87,6 +87,7 @@ function godmode(model: sc.PlayerModel = sc.model.player) {
 }
 
 let res: (() => void) | undefined
+const parallaxList: ig.GUI.Parallax[] = []
 
 export default class MapImage implements PluginClass {
     static dir: string
@@ -149,6 +150,20 @@ export default class MapImage implements PluginClass {
         sc.Arena.inject({
             onVarAccess() {},
         })
+
+        sc.CommonEvent.inject({
+            init(name, data) {
+                data.event = []
+                this.parent(name, data)
+            },
+        })
+
+        ig.GUI.Parallax.inject({
+            init(settings, callback) {
+                this.parent(settings, callback)
+                parallaxList.push(this)
+            },
+        })
     }
 
     async poststart() {
@@ -159,12 +174,40 @@ export default class MapImage implements PluginClass {
 const fs: typeof import('fs') = (0, eval)('require("fs")')
 const path: typeof import('path') = (0, eval)('require("path")')
 
+function setPerf(on: boolean) {
+    ig.perf.gui = on
+    ig.perf.lighting = on
+    ig.perf.weather = on
+    ig.perf.envParticles = on
+}
+
+function removeAddon(addon: ig.GameAddon, game: ig.Game) {
+    for (const key in game.addons) {
+        const arr = game.addons[key as keyof ig.Game['addons']]
+        arr.erase(addon as any)
+    }
+}
+
+function resizeGame(w: number, h: number, scale: number) {
+    ig.system.resize(w, h, scale)
+    ig.ScreenBufferPool.clearBuffers()
+    ig.light.lightCanvas = ig.$new('canvas')
+    ig.light.lightCanvas.width = ig.system.contextWidth + 1
+    ig.light.lightCanvas.height = ig.system.contextHeight + 1
+    ig.light.lightContext = ig.system.getBufferContext(ig.light.lightCanvas)
+    ig.envParticles.width = ig.system.width + 64
+    ig.envParticles.height = ig.system.height + 64
+
+    for (const parallax of parallaxList) {
+        parallax.hook.size.x = w
+        parallax.hook.size.y = h
+    }
+}
+
 async function takeScreenshot() {
-    ig.perf.gui = false
-    ig.perf.lighting = false
-    ig.perf.weather = false
-    ig.perf.envParticles = false
-    ig.game.addons.preUpdate.erase(sc.npcRunner)
+    setPerf(false)
+    removeAddon(sc.npcRunner, ig.game)
+    removeAddon(sc.commonEvents, ig.game)
 
     function hideEntity(entity: ig.Entity) {
         ig.game.shownEntities[entity.id] = null
@@ -201,11 +244,10 @@ async function takeScreenshot() {
             entity.updateSprites()
             entity.update()
         })
-    ig.system.resize(ig.game.size.x, ig.game.size.y, 1)
-    ig.ScreenBufferPool.clearBuffers()
+    resizeGame(ig.game.size.x, ig.game.size.y, 1)
     ig.game.playerEntity.setPos(ig.game.size.x / 2, ig.game.size.y / 2)
     hideEntity(ig.game.playerEntity)
-    await wait(50)
+    await wait(100)
 
     return ig.system.canvas.toDataURL()
 }
@@ -226,65 +268,17 @@ function wait(ms: number): Promise<void> {
 const fileExists = async (path: string) => !!(await fs.promises.stat(path).catch(_e => false))
 
 async function teleport(map: string) {
-    async function tp(
-        this: ig.Game,
-        mapName: string,
-        marker?: Nullable<ig.TeleportPosition>,
-        hint?: ig.Game.TeleportLoadHint,
-        clearCache?: Nullable<boolean>,
-        reloadCache?: Nullable<boolean>
-    ) {
-        this.previousMap = this.mapName
-        this.mapName = mapName
-        this.marker = marker ? marker.marker : null
-        this.teleporting.position = marker!
-        this.teleporting.active = true
-        // this.teleporting.timer = this.onTeleportStart(mapName, marker, hint)
-        this.teleporting.clearCache = clearCache || false
-        this.teleporting.reloadCache = reloadCache || false
-        this.events.clearQueue()
-        for (let i = 0; i < this.addons.teleport.length; ++i) this.addons.teleport[i].onTeleport(mapName, marker, hint)
-        await preloadLevel.call(this, mapName)
+    ig.game.teleport(map)
+    while (ig.game.teleporting.active) {
+        await wait(10)
     }
-
-    async function preloadLevel(this: ig.Game, mapName: string) {
-        this.teleporting.levelData = null
-        this.currentLoadingResource = `LOADING MAP: ${mapName}`
-        // window.IS_IT_CUBAUM = Math.random() < (sc.gameCode.isEnabled('regularTrees') ? 1 : 1e-4)
-        let path = mapName.toPath(`${ig.root}data/maps/`, '.json') + ig.getCacheSuffix()
-
-        const levelData = await new Promise<sc.MapModel.Map>((res, rej) => {
-            $.ajax({
-                dataType: 'json',
-                url: ig.getFilePath(path),
-                context: this,
-                success(a) {
-                    res(a)
-                },
-                error(mapName, c, e) {
-                    rej()
-                    ig.system.error(Error(`Loading of Map '${path}' failed: ${mapName} / ${c} / ${e}`))
-                },
-            })
-        })
-
-        const promise = new Promise<void>(resolve => {
-            res = resolve
-        })
-
-        this.loadLevel(levelData, this.teleporting.clearCache, this.teleporting.reloadCache)
-        // url: ig.getFilePath(a),
-        // ig.system.error(Error(`Loading of Map '${a}' failed: ${mapName} / ${c} / ${e}`))
-
-        console.log(ig.game.mapName, 'loaded, waiting for resource load')
-        await promise
-        console.log('done')
-    }
-
-    await tp.call(ig.game, map)
 }
 
 async function run() {
+    ig.interact.entries.forEach(e => ig.interact.removeEntry(e))
+    sc.model.enterRunning()
+    sc.model.enterGame()
+
     let maps = await findMaps()
     // maps.splice(50, 100000)
     // maps = ['boss-test']
@@ -292,8 +286,10 @@ async function run() {
     maps = maps.filter(map => !invalidMaps.has(map))
     maps = maps.filter(map => !map.includes('test'))
 
+    // maps = ['beach/path-06', 'beach/path-07']
+    // maps = ['bergen/elevator']
+
     // maps = maps.filter(map => map.startsWith('rhombus-dng'))
-    // maps = ['bergen-trail/path-2']
     console.log(maps)
 
     const basePath = '/home/krypek/Temp/maps'
@@ -314,4 +310,20 @@ async function run() {
         console.log(map, 'written')
     }
     console.log('done')
+
+    ig.system.resize(568, 320, 4)
+    ig.ScreenBufferPool.clearBuffers()
+    setPerf(true)
+
+    sc.model.enterReset()
+    sc.model.enterRunning()
+    ig.game.reset()
+    sc.model.enterTitle()
+
+    setTimeout(() => {
+        sc.model.enterReset()
+        sc.model.enterRunning()
+        ig.game.reset()
+        sc.model.enterTitle()
+    }, 100)
 }
