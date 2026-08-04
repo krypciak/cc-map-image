@@ -89,6 +89,8 @@ function godmode(model: sc.PlayerModel = sc.model.player) {
 let res: (() => void) | undefined
 const parallaxList: ig.GUI.Parallax[] = []
 
+const onlyEffects = false
+
 export default class MapImage implements PluginClass {
     static dir: string
     static mod: Mod1
@@ -130,19 +132,19 @@ export default class MapImage implements PluginClass {
 
         ig.MAP.Background.inject({
             preRenderChunk(...args) {
-                if (this.tilesetName?.includes('parallax')) return args[4]
+                if (onlyEffects || this.tilesetName?.includes('parallax')) return args[4]
                 return this.parent(...args)
             },
             preRenderScreen(...args) {
-                if (this.tilesetName?.includes('parallax')) return
+                if (onlyEffects || this.tilesetName?.includes('parallax')) return
                 return this.parent(...args)
             },
             drawAnimated(...args) {
-                if (this.tilesetName?.includes('parallax')) return
+                if (onlyEffects || this.tilesetName?.includes('parallax')) return
                 return this.parent(...args)
             },
             redrawChunkTile(...args) {
-                if (this.tilesetName?.includes('parallax')) return
+                if (onlyEffects || this.tilesetName?.includes('parallax')) return
                 return this.parent(...args)
             },
         })
@@ -174,17 +176,39 @@ export default class MapImage implements PluginClass {
 const fs: typeof import('fs') = (0, eval)('require("fs")')
 const path: typeof import('path') = (0, eval)('require("path")')
 
-function setPerf(on: boolean) {
-    ig.perf.gui = on
-    ig.perf.lighting = on
-    ig.perf.weather = on
-    ig.perf.envParticles = on
+function wait(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
 }
+
+const fileExists = async (path: string) => !!(await fs.promises.stat(path).catch(_e => false))
 
 function removeAddon(addon: ig.GameAddon, game: ig.Game) {
     for (const key in game.addons) {
         const arr = game.addons[key as keyof ig.Game['addons']]
         arr.erase(addon as any)
+    }
+}
+
+function setPerf(enableFilter: boolean) {
+    if (enableFilter) {
+        ig.perf.gui = false
+        if (onlyEffects) {
+            ig.perf.lighting = true
+            ig.perf.weather = true
+            ig.perf.envParticles = true
+            ig.perf.drawSprites = false
+        } else {
+            ig.perf.lighting = false
+            ig.perf.weather = false
+            ig.perf.envParticles = false
+            ig.perf.drawSprites = true
+        }
+    } else {
+        ig.perf.gui = true
+        ig.perf.lighting = true
+        ig.perf.weather = true
+        ig.perf.envParticles = true
+        ig.perf.drawSprites = true
     }
 }
 
@@ -204,8 +228,24 @@ function resizeGame(w: number, h: number, scale: number) {
     }
 }
 
+async function findMaps() {
+    const files: string[] = await fs.promises.readdir('assets/data/maps', { recursive: true })
+    for (const ext of ['fish-gear', 'flying-hedgehag', 'post-game', 'scorpion-robo', 'snowman-tank']) {
+        files.push(...(await fs.promises.readdir(`assets/extension/${ext}/data/maps`, { recursive: true })))
+    }
+    const maps = files.filter(a => a.endsWith('.json')).map(a => a.substring(0, a.length - '.json'.length))
+    return maps
+}
+
+async function teleport(map: string) {
+    ig.game.teleport(map)
+    while (ig.game.teleporting.active) {
+        await wait(10)
+    }
+}
+
 async function takeScreenshot() {
-    setPerf(false)
+    setPerf(true)
     removeAddon(sc.npcRunner, ig.game)
     removeAddon(sc.commonEvents, ig.game)
 
@@ -248,30 +288,9 @@ async function takeScreenshot() {
     ig.game.playerEntity.setPos(ig.game.size.x / 2, ig.game.size.y / 2)
     hideEntity(ig.game.playerEntity)
     await wait(100)
+    await wait(5e3)
 
     return ig.system.canvas.toDataURL()
-}
-
-async function findMaps() {
-    const files: string[] = await fs.promises.readdir('assets/data/maps', { recursive: true })
-    for (const ext of ['fish-gear', 'flying-hedgehag', 'post-game', 'scorpion-robo', 'snowman-tank']) {
-        files.push(...(await fs.promises.readdir(`assets/extension/${ext}/data/maps`, { recursive: true })))
-    }
-    const maps = files.filter(a => a.endsWith('.json')).map(a => a.substring(0, a.length - '.json'.length))
-    return maps
-}
-
-function wait(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-const fileExists = async (path: string) => !!(await fs.promises.stat(path).catch(_e => false))
-
-async function teleport(map: string) {
-    ig.game.teleport(map)
-    while (ig.game.teleporting.active) {
-        await wait(10)
-    }
 }
 
 async function run() {
@@ -286,7 +305,7 @@ async function run() {
     maps = maps.filter(map => !invalidMaps.has(map))
     maps = maps.filter(map => !map.includes('test'))
 
-    // maps = ['beach/path-06', 'beach/path-07']
+    // maps = ['beach/path-06', 'beach/path-07', 'wave-dng/b1/south-02', 'bergen/elevator']
     // maps = ['bergen/elevator']
 
     // maps = maps.filter(map => map.startsWith('rhombus-dng'))
@@ -311,9 +330,8 @@ async function run() {
     }
     console.log('done')
 
-    ig.system.resize(568, 320, 4)
-    ig.ScreenBufferPool.clearBuffers()
-    setPerf(true)
+    resizeGame(568, 320, 4)
+    setPerf(false)
 
     sc.model.enterReset()
     sc.model.enterRunning()
